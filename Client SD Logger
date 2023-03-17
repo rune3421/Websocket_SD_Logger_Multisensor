@@ -1,0 +1,133 @@
+#include <SD.h>
+#include <RTClib.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+
+
+// Wifi Credentials
+const char* ssid = "NETGEAR76"; // Wifi SSID
+const char* password = "elegantplanet085"; //Wi-FI Password
+
+WebSocketsClient webSocket; // websocket client class instance
+
+StaticJsonDocument<100> doc; // Allocate a static JSON document
+
+File myFile;      //creates a file for the SD card to write to
+
+RTC_Millis rtc;
+
+
+void setup() {
+  Serial.begin(115200);
+  
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.begin(DateTime(F(__DATE__), F(__TIME__)));
+    // This line sets the RTC with an explicit date & time, for example to set
+    // January 21, 2014 at 3am you would call:
+    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+  
+  //Start SD Card
+  Serial.print("Initializing SD card...");
+ 
+  if (!SD.begin(5)) {
+    Serial.println("initialization failed!");
+    return;
+  }
+  Serial.println("initialization done.");
+
+    myFile = SD.open("/babyboot.txt", FILE_WRITE);
+  // if the file opened okay, write to it:
+  if (myFile) {
+    Serial.printf("Writing chart headers to %s ", "/babyboot.txt");
+    myFile.println("TIME,ECG,PPG,TEMP,CO2,HEART RATE,RESP RATE");
+    myFile.close(); // close the file:
+    Serial.println("completed.");
+  }   // if the file didn't open, print an error:
+  else {
+    Serial.println("error opening file ");
+    Serial.println("/babyboot.txt");
+  }
+  
+  // Connect to local WiFi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println();
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP()); // Print local IP address
+
+  //address, port, and URL path 
+  webSocket.begin("192.168.1.25", 81, "/"); 
+  // webSocket event handler
+  webSocket.onEvent(webSocketEvent);
+  // if connection failed retry every 5s
+  webSocket.setReconnectInterval(5000);
+}
+
+
+void loop() {
+  webSocket.loop(); // Keep the socket alive
+}
+
+
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+  // Make sure the screen is clear
+  //  u8g2.clearBuffer();
+  if (type == WStype_TEXT)
+  {
+
+    DateTime time = rtc.now();
+    
+    DeserializationError error = deserializeJson(doc, payload); // deserialize incoming Json String. Make sure to use this later for combining multiple throughputs
+    if (error) { // Print erro msg if incomig String is not JSON formated
+      Serial.print(F("deserializeJson() failed: "));
+      Serial.println(error.c_str());
+      return;
+    }
+    const int ECG = doc["ECG"]; // Float variable for each analyte
+    const int PPG = doc["PPG"]; 
+    const int T = doc["T"]; 
+    const int C02 = doc["CO2"];
+    const int HR = doc["HR"]; 
+    const int RR = doc["RR"]; 
+
+    
+    //
+      myFile = SD.open("/babyboot.txt", FILE_APPEND);
+    Serial.print("Writing to babyboot.txt...");
+    if(myFile){
+      myFile.print(time.timestamp(DateTime::TIMESTAMP_TIME));
+      myFile.printf(",");
+      myFile.print(ECG);
+      myFile.printf(",");
+      myFile.print(PPG);
+      myFile.printf(","); 
+      myFile.print(T);
+      myFile.printf(",");
+      myFile.print(C02);
+      myFile.printf(",");
+      myFile.print(HR);
+      myFile.printf(",");
+      myFile.println(RR);
+      myFile.close();
+      } else {Serial.println("error opening babyboot.txt");}
+
+      // Print the received data to Serial for debugging
+    Serial.printf("ECG:");
+    Serial.print(ECG);
+    Serial.printf(", PPG:");
+    Serial.print(PPG);
+    Serial.printf(", T:"); 
+    Serial.print(T);
+    Serial.printf(", CO2:");
+    Serial.print(C02);
+    Serial.printf(", HR:");
+    Serial.print(HR);
+    Serial.printf(", RR:");
+    Serial.println(RR);
+  }
+}
